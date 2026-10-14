@@ -129,12 +129,15 @@
     <div class="row">Gravity <b id="sGravity">1×</b></div>
     <div class="row">State <b id="sState">Running</b></div>
     <div class="row">View <b id="sView">Auto</b></div>
+    <div class="row">Score <b id="sScore">0</b></div>
   </div>
 
   <div id="viewCtl" class="panel">
     <button id="zoomInBtn" class="ghost" title="Zoom in (+)">+</button>
     <button id="zoomOutBtn" class="ghost" title="Zoom out (−)">−</button>
     <button id="fitBtn" class="ghost active" title="Auto view: keep everything in frame (F)">⤢</button>
+    <button id="centerBtn" class="ghost" title="Come back to the center of mass (C)">🎯</button>
+    <button id="shipBtn" class="ghost" title="Launch / follow the spaceship (arrow keys)">🚀</button>
   </div>
 
   <details id="help" class="panel" open>
@@ -155,14 +158,14 @@
     <ul id="cmdList"></ul>
   </details>
 
-  <div id="hint">Click = add planet · Drag = move view · Scroll / pinch = zoom · Shift+drag = throw · Space = pause</div>
+  <div id="hint">Click = add planet · Drag = move view · Scroll / pinch = zoom · Shift+drag = throw<br>Arrow keys = fly a spaceship · Space = shoot · P = pause</div>
 
   <div id="hud" class="panel">
     <div id="transcript">Press 🎙 and say “Hi Cosmos — create the solar system”</div>
     <div class="controls">
       <button id="micBtn">🎙 Listen</button>
       <input id="cmdInput" placeholder="…or type a command and press Enter" autocomplete="off">
-      <button id="voiceBtn" class="ghost" title="Spoken replies">🔊</button>
+      <button id="voiceBtn" class="ghost" title="Sound and spoken replies">🔊</button>
     </div>
   </div>
 
@@ -205,6 +208,7 @@
     const sim = {
       bodies: [],
       sparks: [],
+      rings: [],     // expanding shockwave circles
       paused: false,
       timeScale: 1,
       gravity: 1,
@@ -221,11 +225,15 @@
     //  Camera: (x, y) is the world point at the screen center.
     //  In auto mode it smoothly follows and frames all bodies.
     // ============================================================
-    const cam = { x: W / 2, y: H / 2, zoom: 1, auto: true };
+    const cam = { x: W / 2, y: H / 2, zoom: 1, mode: 'auto', flyTo: null }; // mode: auto | manual | ship
     const MIN_ZOOM = 0.03, MAX_ZOOM = 8;
 
     function screenToWorld(sx, sy) {
       return { x: (sx - W / 2) / cam.zoom + cam.x, y: (sy - H / 2) / cam.zoom + cam.y };
+    }
+
+    function worldToScreen(x, y) {
+      return { x: (x - cam.x) * cam.zoom + W / 2, y: (y - cam.y) * cam.zoom + H / 2 };
     }
 
     // Zoom keeping the world point under (sx, sy) fixed on screen
@@ -236,24 +244,53 @@
       cam.y = p.y - (sy - H / 2) / cam.zoom;
     }
 
-    function setAutoView(on) {
-      cam.auto = on;
-      document.getElementById('fitBtn').classList.toggle('active', on);
+    function setCamMode(mode) {
+      cam.mode = mode;
+      cam.flyTo = null;
+      document.getElementById('fitBtn').classList.toggle('active', mode === 'auto');
+      document.getElementById('shipBtn').classList.toggle('active', mode === 'ship');
+    }
+    const setAutoView = on => setCamMode(on ? 'auto' : 'manual');
+    // Zooming leaves auto view, but keeps following the ship
+    const stopAuto = () => { if (cam.mode === 'auto') setCamMode('manual'); };
+
+    function centerOfMass() {
+      let M = 0, x = 0, y = 0;
+      for (const b of sim.bodies) { M += b.m; x += b.x * b.m; y += b.y * b.m; }
+      return M ? { x: x / M, y: y / M } : null;
     }
 
-    function updateAutoCamera() {
+    // Fly the camera back to the center of mass, keeping the current zoom
+    function centerOnMass() {
+      const c = centerOfMass();
+      if (!c) return false;
+      setCamMode('manual');
+      cam.flyTo = c;
+      return true;
+    }
+
+    function updateCamera() {
+      if (cam.flyTo) {
+        cam.x += (cam.flyTo.x - cam.x) * 0.1;
+        cam.y += (cam.flyTo.y - cam.y) * 0.1;
+        if (Math.hypot(cam.flyTo.x - cam.x, cam.flyTo.y - cam.y) * cam.zoom < 0.5) cam.flyTo = null;
+        return;
+      }
+      if (cam.mode === 'ship' && ship.alive) {
+        // follow the ship, looking a little ahead of where it's going
+        cam.x += (ship.x + ship.vx * 15 - cam.x) * 0.08;
+        cam.y += (ship.y + ship.vy * 15 - cam.y) * 0.08;
+        return;
+      }
       const bs = sim.bodies;
-      if (!cam.auto || bs.length === 0) return;
-      // center of mass
-      let M = 0, cx = 0, cy = 0;
-      for (const b of bs) { M += b.m; cx += b.x * b.m; cy += b.y * b.m; }
-      cx /= M; cy /= M;
+      if (cam.mode !== 'auto' || bs.length === 0) return;
+      const c = centerOfMass();
       // radius that holds 90% of the bodies (ignores a few runaways)
-      const d = bs.map(b => Math.hypot(b.x - cx, b.y - cy)).sort((a, b) => a - b);
+      const d = bs.map(b => Math.hypot(b.x - c.x, b.y - c.y)).sort((a, b) => a - b);
       const R = d[Math.floor((d.length - 1) * 0.9)] + 40;
       const target = clamp(Math.min(W, H - 160) * 0.48 / R, MIN_ZOOM, 2.5);
-      cam.x += (cx - cam.x) * 0.06;
-      cam.y += (cy - cam.y) * 0.06;
+      cam.x += (c.x - cam.x) * 0.06;
+      cam.y += (c.y - cam.y) * 0.06;
       cam.zoom *= Math.pow(target / cam.zoom, 0.06);
     }
 
@@ -347,7 +384,9 @@
     function clearAll() {
       sim.bodies = [];
       sim.sparks = [];
-      setAutoView(true);
+      sim.rings = [];
+      bullets.length = 0;
+      setCamMode(ship.alive ? 'ship' : 'auto');
     }
 
     function solarSystem() {
@@ -467,7 +506,7 @@
     function scene(build, reply) {
       build();
       sim.paused = false;
-      setAutoView(true);
+      if (ship.alive) placeShip(); // move the ship somewhere safe in the new scene
       return reply;
     }
 
@@ -484,9 +523,10 @@
     const RULES = [
       [/\bhelp\b|what can you/, () => { document.getElementById('help').open = true; return "Here's what I can do."; }],
       [/\b(trails?|tails?|trial)\b/, setTrails],
-      [/zoom ?out|zoom back|further|farther|wider/, () => { zoomAt(W / 2, H / 2, 1 / 1.6); setAutoView(false); return 'Zooming out.'; }],
-      [/zoom|closer|enlarge|magnify/, () => { zoomAt(W / 2, H / 2, 1.6); setAutoView(false); return 'Zooming in.'; }],
-      [/\b(fit|overview|show (me )?(all|everything)|auto ?view|reset (the )?(view|camera)|cent(er|re)|where)\b/, () => { setAutoView(true); return 'Showing everything.'; }],
+      [/zoom ?out|zoom back|further|farther|wider/, () => { zoomAt(W / 2, H / 2, 1 / 1.6); stopAuto(); return 'Zooming out.'; }],
+      [/zoom|closer|enlarge|magnify/, () => { zoomAt(W / 2, H / 2, 1.6); stopAuto(); return 'Zooming in.'; }],
+      [/\b(fit|overview|show (me )?(all|everything)|auto ?view|reset (the )?(view|camera)|where)\b/, () => { setAutoView(true); return 'Showing everything.'; }],
+      [/\b(cent(er|re)|come back|home|middle)\b/, () => (centerOnMass() ? 'Back to the center of mass.' : 'Nothing to center on.')],
       [/sol[ae]r|\bsystem\b/, () => scene(solarSystem, 'Creating the solar system.')],
       [/binary|by nary|two stars|double stars?\b|twin/, () => scene(binaryStars, 'Creating binary stars.')],
       [/gala|spiral|milky/, () => scene(galaxy, 'Creating a spiral galaxy.')],
@@ -497,6 +537,8 @@
         for (let i = 0; i < n; i++) addComet();
         return n > 1 ? `Launching ${n} comets.` : 'Launching a comet.';
       }],
+      [/\b(space ?ship|ship|rocket|spacecraft)\b/, () => { spawnShip(); return 'Spaceship ready. Arrow keys to fly, space to shoot.'; }],
+      [/\b(fire|shoot|blast)\b/, () => (ship.alive ? (fireBullet(), 'Pew!') : 'Launch the spaceship first.')],
       [/revers|rewind|backward|undo time|back in time/, () => { reverseTime(); return 'Reversing time.'; }],
       [/\b(stop|stopped|pause|paused|freeze|halt|wait|hold)\b/, () => { sim.paused = true; return 'Simulation paused.'; }],
       [/\b(start|started|resume|play|continue|go|unpause|run|unfreeze)\b/, () => { sim.paused = false; return 'Simulation running.'; }],
@@ -550,6 +592,8 @@
       ['clear', 'control'],
       ['zoom in / out', 'view'],
       ['show everything', 'view'],
+      ['come back to center', 'view'],
+      ['launch the spaceship', 'ship'],
     ];
     const cmdList = document.getElementById('cmdList');
     for (const [text, tag] of COMMANDS) {
@@ -789,7 +833,7 @@
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) { drag = null; pinch = pinchState(); return; }
       const mode = e.button === 2 || e.shiftKey ? 'throw' : 'click';
-      drag = { mode, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
+      drag = { mode, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, m: rand(3, 15), color: randColor() };
     });
 
     canvas.addEventListener('pointermove', e => {
@@ -808,6 +852,7 @@
       if (!drag) return;
       if (drag.mode === 'click' && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 6) drag.mode = 'pan';
       if (drag.mode === 'pan') {
+        canvas.style.cursor = 'grabbing';
         cam.x -= (e.clientX - drag.x) / cam.zoom;
         cam.y -= (e.clientY - drag.y) / cam.zoom;
         setAutoView(false);
@@ -818,19 +863,22 @@
     function endPointer(e, cancelled) {
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinch = null;
+      canvas.style.cursor = shiftDown ? 'crosshair' : '';
       if (!drag || cancelled) { drag = null; return; }
 
       const start = screenToWorld(drag.x0, drag.y0);
       const dx = drag.x - drag.x0, dy = drag.y - drag.y0;
-      const m = rand(3, 15);
+      const { m, color } = drag;
       const isClick = Math.hypot(dx, dy) < 6;
       if (drag.mode === 'click' || (drag.mode === 'throw' && isClick)) {
         const c = heaviest();
-        if (c) addBody({ x: start.x, y: start.y, m, ...orbitVelocity(start.x, start.y, c) });
+        if (c) addBody({ x: start.x, y: start.y, m, color, ...orbitVelocity(start.x, start.y, c) });
         else addBody({ x: start.x, y: start.y, m: 4000, color: '#ffcc55', type: 'star' });
         hideHint();
       } else if (drag.mode === 'throw') {
-        addBody({ x: start.x, y: start.y, vx: dx / cam.zoom * 0.03, vy: dy / cam.zoom * 0.03, m });
+        addBody({ x: start.x, y: start.y, m, color, ...throwVelocity(dx, dy) });
+        spawnSparks(start.x, start.y, color, 14);
+        addRing(start.x, start.y, color, 30);
         hideHint();
       }
       drag = null;
@@ -843,20 +891,248 @@
       const delta = e.deltaY * (e.deltaMode === 1 ? 30 : 1);
       // trackpad pinch arrives as ctrl+wheel with small deltas
       zoomAt(e.clientX, e.clientY, Math.exp(-delta * (e.ctrlKey ? 0.01 : 0.0015)));
-      setAutoView(false);
+      stopAuto();
     }, { passive: false });
 
-    document.getElementById('zoomInBtn').addEventListener('click', () => { zoomAt(W / 2, H / 2, 1.5); setAutoView(false); });
-    document.getElementById('zoomOutBtn').addEventListener('click', () => { zoomAt(W / 2, H / 2, 1 / 1.5); setAutoView(false); });
-    document.getElementById('fitBtn').addEventListener('click', () => setAutoView(!cam.auto));
+    document.getElementById('zoomInBtn').addEventListener('click', () => { zoomAt(W / 2, H / 2, 1.5); stopAuto(); });
+    document.getElementById('zoomOutBtn').addEventListener('click', () => { zoomAt(W / 2, H / 2, 1 / 1.5); stopAuto(); });
+    document.getElementById('fitBtn').addEventListener('click', () => setAutoView(cam.mode !== 'auto'));
+
+    document.getElementById('centerBtn').addEventListener('click', () => { if (!centerOnMass()) toast('Nothing to center on.'); });
+    document.getElementById('shipBtn').addEventListener('click', () => (ship.alive ? setCamMode('ship') : spawnShip()));
+    // Don't let Space "click" the last pressed button again
+    document.querySelectorAll('button').forEach(b => b.addEventListener('click', () => b.blur()));
+
+    const keys = new Set();
+    const SHIP_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+    let shiftDown = false;
+
+    function togglePause() {
+      sim.paused = !sim.paused;
+      toast(sim.paused ? 'Simulation paused.' : 'Simulation running.');
+    }
 
     window.addEventListener('keydown', e => {
+      if (e.key === 'Shift') { shiftDown = true; if (!drag) canvas.style.cursor = 'crosshair'; }
       if (e.target === cmdInput) return;
-      if (e.code === 'Space') { e.preventDefault(); sim.paused = !sim.paused; toast(sim.paused ? 'Simulation paused.' : 'Simulation running.'); }
-      else if (e.key === '+' || e.key === '=') { zoomAt(W / 2, H / 2, 1.5); setAutoView(false); }
-      else if (e.key === '-' || e.key === '_') { zoomAt(W / 2, H / 2, 1 / 1.5); setAutoView(false); }
-      else if (e.key === 'f' || e.key === 'F') setAutoView(true);
+      if (SHIP_KEYS.includes(e.code)) {
+        e.preventDefault();
+        keys.add(e.code);
+        if (!ship.alive && performance.now() > ship.respawnAt) spawnShip();
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        if (ship.alive) keys.add('Space');
+        else if (!e.repeat) togglePause();
+      } else if (e.code === 'KeyP') togglePause();
+      else if (e.key === '+' || e.key === '=') { zoomAt(W / 2, H / 2, 1.5); stopAuto(); }
+      else if (e.key === '-' || e.key === '_') { zoomAt(W / 2, H / 2, 1 / 1.5); stopAuto(); }
+      else if (e.code === 'KeyF') setAutoView(true);
+      else if (e.code === 'KeyC') centerOnMass();
     });
+    window.addEventListener('keyup', e => {
+      keys.delete(e.code);
+      if (e.key === 'Shift') { shiftDown = false; if (!drag) canvas.style.cursor = ''; }
+    });
+    window.addEventListener('blur', () => { keys.clear(); shiftDown = false; });
+
+    // ============================================================
+    //  Spaceship: ← → rotate · ↑ thrust · ↓ brake · Space shoot
+    // ============================================================
+    const SHIP_R = 7;
+    const SHIP_GRAVITY = 0.35; // the ship feels gravity, but weaker so it stays flyable
+    const ship = { alive: false, x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI / 2, thrusting: false, cooldown: 0, invuln: 0, respawnAt: 0 };
+    const bullets = [];
+    let score = 0;
+
+    function addRing(x, y, color, maxR) {
+      sim.rings.push({ x, y, color, r: 0, maxR, life: 1 });
+    }
+
+    // The spot in view that is farthest from every body
+    function safeSpot() {
+      let best = null, bestScore = -Infinity;
+      for (let i = 0; i < 40; i++) {
+        const p = screenToWorld(rand(W * 0.2, W * 0.8), rand(H * 0.2, H * 0.65));
+        let score = Infinity;
+        for (const b of sim.bodies) score = Math.min(score, Math.hypot(b.x - p.x, b.y - p.y) - b.r * 4);
+        if (score > bestScore) { bestScore = score; best = p; }
+      }
+      return best;
+    }
+
+    function placeShip() {
+      const p = safeSpot();
+      ship.x = p.x; ship.y = p.y; ship.vx = 0; ship.vy = 0;
+      // start in a gentle orbit around the heaviest body so gravity doesn't pull it straight in
+      const c = heaviest();
+      if (c) {
+        const dx = p.x - c.x, dy = p.y - c.y, r = Math.hypot(dx, dy) || 1;
+        const v = Math.sqrt(SHIP_GRAVITY * G() * c.m / r);
+        ship.vx = c.vx - (dy / r) * v;
+        ship.vy = c.vy + (dx / r) * v;
+      }
+      ship.angle = Math.hypot(ship.vx, ship.vy) > 0.1 ? Math.atan2(ship.vy, ship.vx) : -Math.PI / 2;
+      ship.invuln = 120; // ~2 seconds of blinking safety
+    }
+
+    function spawnShip() {
+      ship.alive = true;
+      placeShip();
+      setCamMode('ship');
+      addRing(ship.x, ship.y, '#4fd6ff', 40);
+      hideHint();
+    }
+
+    function fireBullet() {
+      const cos = Math.cos(ship.angle), sin = Math.sin(ship.angle);
+      bullets.push({
+        x: ship.x + cos * SHIP_R * 1.6, y: ship.y + sin * SHIP_R * 1.6,
+        vx: ship.vx + cos * 9, vy: ship.vy + sin * 9, life: 90,
+      });
+      sfx('shoot');
+    }
+
+    // Stars take 6 hits, big planets 2, everything else 1
+    const maxHp = b => (b.type === 'star' ? 6 : b.m > 20 ? 2 : 1);
+
+    function destroyBody(b) {
+      const i = sim.bodies.indexOf(b);
+      if (i === -1) return;
+      sim.bodies.splice(i, 1);
+      if (b.type === 'star') {
+        // supernova: flash, shockwaves and fragments flung outward
+        spawnSparks(b.x, b.y, '#ffffff', 60);
+        spawnSparks(b.x, b.y, b.color, 80);
+        addRing(b.x, b.y, b.color, b.r * 14);
+        addRing(b.x, b.y, '#ffffff', b.r * 8);
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2 + rand(-0.2, 0.2), sp = rand(1.5, 3.5);
+          addBody({
+            x: b.x + Math.cos(a) * b.r * 1.8, y: b.y + Math.sin(a) * b.r * 1.8,
+            vx: b.vx + Math.cos(a) * sp, vy: b.vy + Math.sin(a) * sp,
+            m: rand(2, 6), color: k % 2 ? b.color : '#ff8a5b',
+          });
+        }
+        score += 100;
+        toast('Supernova! +100');
+        sfx('big');
+      } else {
+        spawnSparks(b.x, b.y, b.color, 20 + b.r * 4);
+        addRing(b.x, b.y, b.color, b.r * 6 + 10);
+        score += 10;
+        sfx('boom');
+      }
+    }
+
+    function hitBody(b, bullet) {
+      if (b.type === 'hole') { spawnSparks(bullet.x, bullet.y, '#ff9d4f', 4); return; } // black holes swallow bullets
+      b.hp = (b.hp ?? maxHp(b)) - 1;
+      b.flash = 6;
+      spawnSparks(bullet.x, bullet.y, '#ffe066', 6);
+      if (b.hp <= 0) destroyBody(b);
+      else sfx('hit');
+    }
+
+    function crashShip(b) {
+      ship.alive = false;
+      ship.respawnAt = performance.now() + 1200;
+      spawnSparks(ship.x, ship.y, '#4fd6ff', 50);
+      spawnSparks(ship.x, ship.y, '#ffb35b', 30);
+      addRing(ship.x, ship.y, '#ff6b4f', 60);
+      sfx('big');
+      if (b.type === 'planet' && b.m < 30) destroyBody(b); // small planets break too
+      toast(b.type === 'hole' ? 'Swallowed by a black hole! Press ↑ to respawn' : 'Ship destroyed! Press ↑ to respawn');
+    }
+
+    function updateShip() {
+      if (!ship.alive) return;
+      if (keys.has('ArrowLeft')) ship.angle -= 0.075;
+      if (keys.has('ArrowRight')) ship.angle += 0.075;
+      ship.thrusting = keys.has('ArrowUp');
+      if (ship.thrusting) {
+        ship.vx += Math.cos(ship.angle) * 0.16;
+        ship.vy += Math.sin(ship.angle) * 0.16;
+        // exhaust particles
+        const back = ship.angle + Math.PI + rand(-0.3, 0.3);
+        sim.sparks.push({
+          x: ship.x - Math.cos(ship.angle) * SHIP_R, y: ship.y - Math.sin(ship.angle) * SHIP_R,
+          vx: ship.vx + Math.cos(back) * 2, vy: ship.vy + Math.sin(back) * 2,
+          life: 0.6, color: Math.random() < 0.5 ? '#ffb35b' : '#ffe066',
+        });
+      }
+      if (keys.has('ArrowDown')) { ship.vx *= 0.95; ship.vy *= 0.95; }
+
+      const g = G() * SHIP_GRAVITY;
+      for (const b of sim.bodies) {
+        const dx = b.x - ship.x, dy = b.y - ship.y;
+        const d2 = dx * dx + dy * dy + SOFTENING;
+        const a = g * b.m / (d2 * Math.sqrt(d2));
+        ship.vx += dx * a; ship.vy += dy * a;
+      }
+      const speed = Math.hypot(ship.vx, ship.vy);
+      if (speed > 12) { ship.vx *= 12 / speed; ship.vy *= 12 / speed; }
+      ship.x += ship.vx; ship.y += ship.vy;
+
+      if (ship.cooldown > 0) ship.cooldown--;
+      if (keys.has('Space') && ship.cooldown === 0) { fireBullet(); ship.cooldown = 9; }
+
+      if (ship.invuln > 0) { ship.invuln--; return; }
+      for (const b of sim.bodies) {
+        const rr = b.r + SHIP_R * 0.8;
+        if ((b.x - ship.x) ** 2 + (b.y - ship.y) ** 2 < rr * rr) { crashShip(b); return; }
+      }
+    }
+
+    function updateBullets() {
+      next: for (let i = bullets.length - 1; i >= 0; i--) {
+        const p = bullets[i];
+        if (--p.life <= 0) { bullets.splice(i, 1); continue; }
+        // move in 3 small steps so fast bullets can't skip over small planets
+        for (let k = 0; k < 3; k++) {
+          p.x += p.vx / 3; p.y += p.vy / 3;
+          const b = sim.bodies.find(b => (b.x - p.x) ** 2 + (b.y - p.y) ** 2 < (b.r + 2) ** 2);
+          if (b) { bullets.splice(i, 1); hitBody(b, p); continue next; }
+        }
+      }
+    }
+
+    // Tiny synthesized sound effects (muted together with spoken replies)
+    let sfxCtx = null;
+    function sfx(kind) {
+      if (!voiceReplies) return;
+      try {
+        sfxCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+        const t = sfxCtx.currentTime;
+        const gain = sfxCtx.createGain();
+        gain.connect(sfxCtx.destination);
+        if (kind === 'shoot' || kind === 'hit') {
+          const osc = sfxCtx.createOscillator();
+          osc.type = 'square';
+          osc.frequency.setValueAtTime(kind === 'shoot' ? 880 : 300, t);
+          osc.frequency.exponentialRampToValueAtTime(kind === 'shoot' ? 220 : 120, t + 0.12);
+          gain.gain.setValueAtTime(0.04, t);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+          osc.connect(gain);
+          osc.start(t);
+          osc.stop(t + 0.13);
+        } else {
+          // explosion: fading low-passed noise
+          const dur = kind === 'big' ? 1.4 : 0.5;
+          const buf = sfxCtx.createBuffer(1, Math.floor(sfxCtx.sampleRate * dur), sfxCtx.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) ** 2;
+          const src = sfxCtx.createBufferSource();
+          const filter = sfxCtx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = kind === 'big' ? 500 : 1200;
+          gain.gain.value = kind === 'big' ? 0.5 : 0.3;
+          src.buffer = buf;
+          src.connect(filter);
+          filter.connect(gain);
+          src.start(t);
+        }
+      } catch (_) {}
+    }
 
     // ============================================================
     //  Rendering
@@ -924,6 +1200,11 @@
             ctx.beginPath(); ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.4, 0, Math.PI * 2); ctx.fill();
           }
         }
+        if (body.flash > 0) {
+          body.flash--;
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.15, 0, Math.PI * 2); ctx.fill();
+        }
       }
     }
 
@@ -940,17 +1221,184 @@
       ctx.globalAlpha = 1;
     }
 
-    function drawDrag() {
+    const THROW_SPEED = 0.03;
+    const throwVelocity = (dx, dy) => ({ vx: dx / cam.zoom * THROW_SPEED, vy: dy / cam.zoom * THROW_SPEED });
+
+    // Predict a thrown planet's path, simulating it together with the heaviest bodies (which move too)
+    function predictPath(x, y, vx, vy) {
+      const heavy = sim.bodies.filter(b => b.m >= 50).sort((a, b) => b.m - a.m).slice(0, 8)
+        .map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, m: b.m, r: b.r, ax: 0, ay: 0 }));
+      const g = G(), dt = 0.5, pts = [{ x, y }];
+      for (let f = 0; f < 600; f++) {
+        let ax = 0, ay = 0;
+        for (const h of heavy) { h.ax = 0; h.ay = 0; }
+        for (let i = 0; i < heavy.length; i++) {
+          const a = heavy[i];
+          for (let j = i + 1; j < heavy.length; j++) {
+            const b = heavy[j];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const d2 = dx * dx + dy * dy + SOFTENING;
+            const inv = g / (d2 * Math.sqrt(d2));
+            a.ax += dx * inv * b.m; a.ay += dy * inv * b.m;
+            b.ax -= dx * inv * a.m; b.ay -= dy * inv * a.m;
+          }
+          const dx = a.x - x, dy = a.y - y;
+          const d2 = dx * dx + dy * dy + SOFTENING;
+          const inv = g / (d2 * Math.sqrt(d2));
+          ax += dx * inv * a.m; ay += dy * inv * a.m;
+        }
+        for (const h of heavy) { h.vx += h.ax * dt; h.vy += h.ay * dt; h.x += h.vx * dt; h.y += h.vy * dt; }
+        vx += ax * dt; vy += ay * dt;
+        x += vx * dt; y += vy * dt;
+        if (f % 4 === 3) pts.push({ x, y });
+        if (heavy.some(h => (h.x - x) ** 2 + (h.y - y) ** 2 < (h.r + 2) ** 2)) return { pts, hit: { x, y } };
+      }
+      return { pts, hit: null };
+    }
+
+    // Shift+drag preview (world space): glowing planet, launch arrow and animated predicted path
+    function drawThrow(t) {
+      if (!drag || drag.mode !== 'throw') return;
+      const z = cam.zoom;
+      const start = screenToWorld(drag.x0, drag.y0);
+      const end = screenToWorld(drag.x, drag.y);
+      const dx = drag.x - drag.x0, dy = drag.y - drag.y0;
+
+      if (Math.hypot(dx, dy) >= 6) {
+        const v = throwVelocity(dx, dy);
+        const { pts, hit } = predictPath(start.x, start.y, v.vx, v.vy);
+
+        // marching dots along the predicted path, fading with time
+        const offset = (t * 0.002) % 1;
+        ctx.fillStyle = drag.color;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i], b = pts[i + 1];
+          ctx.globalAlpha = 0.85 * (1 - i / pts.length);
+          ctx.beginPath();
+          ctx.arc(a.x + (b.x - a.x) * offset, a.y + (b.y - a.y) * offset, 1.7 / z, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (hit) {
+          // impact warning
+          const s = 6 / z;
+          ctx.globalAlpha = 0.6 + 0.4 * Math.sin(t * 0.015);
+          ctx.strokeStyle = '#ff6b6b';
+          ctx.lineWidth = 2 / z;
+          ctx.beginPath();
+          ctx.moveTo(hit.x - s, hit.y - s); ctx.lineTo(hit.x + s, hit.y + s);
+          ctx.moveTo(hit.x + s, hit.y - s); ctx.lineTo(hit.x - s, hit.y + s);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+
+        // launch arrow: fades in from the planet, thicker the faster the throw
+        const len = Math.hypot(end.x - start.x, end.y - start.y);
+        const ux = (end.x - start.x) / len, uy = (end.y - start.y) / len;
+        const grad = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
+        grad.addColorStop(0, drag.color + '00');
+        grad.addColorStop(1, drag.color);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = (2 + Math.min(6, (len * z) / 40)) / z;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+        const h = 9 / z;
+        ctx.fillStyle = drag.color;
+        ctx.beginPath();
+        ctx.moveTo(end.x + ux * h, end.y + uy * h);
+        ctx.lineTo(end.x - ux * h - uy * h, end.y - uy * h + ux * h);
+        ctx.lineTo(end.x - ux * h + uy * h, end.y - uy * h - ux * h);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // the planet waiting to be launched, with a pulsing halo
+      const r = radiusFor(drag.m, 'planet');
+      const halo = (r * 2.5 + 6 / z) * (1 + 0.15 * Math.sin(t * 0.01));
+      const g = ctx.createRadialGradient(start.x, start.y, r * 0.5, start.x, start.y, halo);
+      g.addColorStop(0, drag.color + 'aa');
+      g.addColorStop(1, drag.color + '00');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(start.x, start.y, halo, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = drag.color;
+      ctx.beginPath(); ctx.arc(start.x, start.y, Math.max(r, 1.5 / z), 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Speed readout next to the cursor (screen space)
+    function drawThrowLabel() {
       if (!drag || drag.mode !== 'throw') return;
       const dx = drag.x - drag.x0, dy = drag.y - drag.y0;
       if (Math.hypot(dx, dy) < 6) return;
-      ctx.strokeStyle = 'rgba(79,214,255,0.8)';
-      ctx.setLineDash([5, 5]);
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(drag.x0, drag.y0); ctx.lineTo(drag.x, drag.y); ctx.stroke();
-      ctx.setLineDash([]);
+      const v = throwVelocity(dx, dy);
+      ctx.font = '600 12px system-ui, sans-serif';
+      ctx.fillStyle = '#e6e9ff';
+      ctx.fillText(`speed ${Math.hypot(v.vx, v.vy).toFixed(1)}`, drag.x + 14, drag.y - 10);
+    }
+
+    function drawRings() {
+      for (let i = sim.rings.length - 1; i >= 0; i--) {
+        const ring = sim.rings[i];
+        ring.life -= 0.025;
+        ring.r += (ring.maxR - ring.r) * 0.08;
+        if (ring.life <= 0) { sim.rings.splice(i, 1); continue; }
+        ctx.globalAlpha = ring.life;
+        ctx.strokeStyle = ring.color;
+        ctx.lineWidth = 3 / cam.zoom;
+        ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBullets() {
+      ctx.strokeStyle = '#ffe066';
+      ctx.lineWidth = 2.5 / cam.zoom;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = '#ffe066';
+      ctx.shadowBlur = 8;
+      for (const p of bullets) {
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 0.8, p.y - p.vy * 0.8); ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    function drawShip() {
+      if (!ship.alive) return;
+      if (ship.invuln > 0 && Math.floor(ship.invuln / 6) % 2 === 0) ctx.globalAlpha = 0.35;
+      const s = Math.max(SHIP_R, 8 / cam.zoom);
+      ctx.save();
+      ctx.translate(ship.x, ship.y);
+      ctx.rotate(ship.angle);
+      if (ship.thrusting) {
+        const f = s * (1.2 + Math.random() * 0.8);
+        const g = ctx.createLinearGradient(-s * 0.6, 0, -s * 0.6 - f, 0);
+        g.addColorStop(0, '#ffe066');
+        g.addColorStop(1, 'rgba(255,107,79,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(-s * 0.6, -s * 0.45); ctx.lineTo(-s * 0.6 - f, 0); ctx.lineTo(-s * 0.6, s * 0.45); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = '#e6e9ff';
+      ctx.strokeStyle = '#4fd6ff';
+      ctx.lineWidth = 1.5 / cam.zoom;
+      ctx.beginPath();
+      ctx.moveTo(s * 1.4, 0); ctx.lineTo(-s, -s * 0.8); ctx.lineTo(-s * 0.6, 0); ctx.lineTo(-s, s * 0.8);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#4fd6ff';
-      ctx.beginPath(); ctx.arc(drag.x0, drag.y0, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s * 0.3, 0, s * 0.25, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    // Arrow at the screen edge pointing to the ship when it's out of view
+    function drawShipIndicator() {
+      if (!ship.alive) return;
+      const p = worldToScreen(ship.x, ship.y), m = 24;
+      if (p.x > m && p.x < W - m && p.y > m && p.y < H - m) return;
+      ctx.save();
+      ctx.translate(clamp(p.x, m, W - m), clamp(p.y, m, H - m));
+      ctx.rotate(Math.atan2(p.y - H / 2, p.x - W / 2));
+      ctx.fillStyle = '#4fd6ff';
+      ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-6, -7); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill();
+      ctx.restore();
     }
 
     // Circular audio visualizer just above the control panel
@@ -998,6 +1446,7 @@
       gravity: document.getElementById('sGravity'),
       state: document.getElementById('sState'),
       view: document.getElementById('sView'),
+      score: document.getElementById('sScore'),
     };
     let frameCount = 0;
 
@@ -1009,7 +1458,7 @@
         const dt = sim.timeScale / substeps;
         for (let i = 0; i < substeps; i++) step(dt);
 
-          // drop bodies that flew very far from the heaviest one
+        // drop bodies that flew very far from the heaviest one
         const h = heaviest();
         const limit = Math.max(W, H) * 10;
         if (h) sim.bodies = sim.bodies.filter(b => Math.abs(b.x - h.x) < limit && Math.abs(b.y - h.y) < limit);
@@ -1021,19 +1470,26 @@
             if (b.trail.length > MAX_TRAIL) b.trail.shift();
           }
         }
+        updateShip();
+        updateBullets();
       }
 
-      updateAutoCamera();
+      updateCamera();
       drawBackground(t);
       ctx.save();
       ctx.translate(W / 2, H / 2);
       ctx.scale(cam.zoom, cam.zoom);
       ctx.translate(-cam.x, -cam.y);
       drawTrails();
+      drawRings();
       drawBodies(t);
       drawSparks();
+      drawBullets();
+      drawShip();
+      drawThrow(t);
       ctx.restore();
-      drawDrag();
+      drawThrowLabel();
+      drawShipIndicator();
       drawVisualizer(t);
 
       if (++frameCount % 10 === 0) {
@@ -1041,7 +1497,8 @@
         statEls.speed.textContent = sim.timeScale + '×';
         statEls.gravity.textContent = sim.gravity + '×';
         statEls.state.textContent = sim.paused ? 'Paused' : 'Running';
-        statEls.view.textContent = (cam.auto ? 'Auto ' : '') + Math.round(cam.zoom * 100) + '%';
+        statEls.view.textContent = ({ auto: 'Auto ', ship: 'Ship ' }[cam.mode] || '') + Math.round(cam.zoom * 100) + '%';
+        statEls.score.textContent = score;
       }
       requestAnimationFrame(frame);
     }
