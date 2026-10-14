@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hi Cosmos</title>
+  <style>
+    :root {
+      --bg: #05060f;
+      --panel: rgba(16, 20, 40, 0.72);
+      --border: rgba(140, 160, 255, 0.18);
+      --text: #e6e9ff;
+      --muted: #8d94b8;
+      --accent: #8b7bff;
+      --accent2: #4fd6ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    canvas { display: block; position: fixed; inset: 0; touch-action: none; }
+
+    .panel {
+      position: fixed;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    #stats { top: 16px; left: 16px; padding: 12px 16px; min-width: 190px; }
+    #stats h1 {
+      margin: 0 0 6px; font-size: 1.25rem; letter-spacing: 0.5px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    #stats .row { font-size: 0.82rem; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; }
+    #stats .row b { color: var(--text); font-weight: 600; }
+
+    #help { top: 16px; right: 16px; width: 270px; max-height: calc(100% - 230px); overflow: auto; padding: 12px 14px; }
+    #help summary { cursor: pointer; font-weight: 600; font-size: 0.95rem; list-style: none; }
+    #help summary::-webkit-details-marker { display: none; }
+    #help summary::after { content: " ▾"; color: var(--muted); }
+    #help:not([open]) summary::after { content: " ▸"; }
+    #help p { font-size: 0.78rem; color: var(--muted); margin: 8px 0; }
+    #help ul { list-style: none; padding: 0; margin: 0; }
+    #help li {
+      font-size: 0.82rem; padding: 6px 8px; border-radius: 8px; cursor: pointer;
+      display: flex; justify-content: space-between; gap: 8px;
+    }
+    #help li:hover { background: rgba(139, 123, 255, 0.15); }
+    #help li span { color: var(--muted); font-size: 0.72rem; text-align: right; }
+
+    #hud {
+      bottom: 16px; left: 50%; transform: translateX(-50%);
+      width: min(560px, calc(100% - 32px));
+      padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+    }
+    #transcript {
+      min-height: 1.4em; font-size: 0.9rem; text-align: center; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #transcript.interim { font-style: italic; opacity: 0.7; }
+    #transcript.awake { color: var(--accent2); }
+    #transcript.ok { color: #7bff9e; }
+    #transcript.bad { color: #ff8a8a; }
+
+    #viewCtl { top: 150px; left: 16px; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+    #viewCtl button { width: 38px; height: 38px; padding: 0; font-size: 1.1rem; }
+    #viewCtl button.active { box-shadow: 0 0 0 2px var(--accent2); }
+
+    .settings { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 10px; font-size: 0.8rem; color: var(--muted); }
+    .settings label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    select {
+      background: rgba(0,0,0,0.35); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 4px 6px; font-size: 0.8rem;
+    }
+    .controls { display: flex; gap: 8px; }
+    button {
+      background: linear-gradient(135deg, var(--accent), #5b6cff);
+      color: #fff; border: none; border-radius: 10px; padding: 10px 14px;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    button:hover { filter: brightness(1.1); }
+    button.on { background: linear-gradient(135deg, #ff5b8a, #ff7b5b); }
+    button.ghost { background: rgba(255,255,255,0.06); border: 1px solid var(--border); font-weight: 500; }
+    input {
+      flex: 1; min-width: 0; background: rgba(0,0,0,0.35); color: var(--text);
+      border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 0.9rem;
+      user-select: text;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+
+    #toast {
+      position: fixed; top: 22px; left: 50%; transform: translate(-50%, -20px);
+      padding: 10px 18px; border-radius: 999px; font-size: 0.95rem; font-weight: 600;
+      background: rgba(139, 123, 255, 0.9); color: #fff; opacity: 0; pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    #hint {
+      position: fixed; bottom: 150px; left: 50%; transform: translateX(-50%);
+      font-size: 0.8rem; color: var(--muted); pointer-events: none; text-align: center;
+      transition: opacity 0.6s;
+    }
+
+    @media (max-width: 700px) {
+      #help { top: auto; bottom: 150px; right: 16px; left: 16px; width: auto; max-height: 40%; }
+      #help:not([open]) { left: auto; }
+      #hint { display: none; }
+      #stats { padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="sky"></canvas>
+
+  <div id="stats" class="panel">
+    <h1>✦ Hi Cosmos</h1>
+    <div class="row">Bodies <b id="sBodies">0</b></div>
+    <div class="row">Speed <b id="sSpeed">1×</b></div>
+    <div class="row">Gravity <b id="sGravity">1×</b></div>
+    <div class="row">State <b id="sState">Running</b></div>
+    <div class="row">View <b id="sView">Auto</b></div>
+  </div>
+
+  <div id="viewCtl" class="panel">
+    <button id="zoomInBtn" class="ghost" title="Zoom in (+)">+</button>
+    <button id="zoomOutBtn" class="ghost" title="Zoom out (−)">−</button>
+    <button id="fitBtn" class="ghost active" title="Auto view: keep everything in frame (F)">⤢</button>
+  </div>
+
+  <details id="help" class="panel" open>
+    <summary>Voice commands</summary>
+    <p>Say <b>"Hi Cosmos"</b> followed by a command, or click one below.</p>
+    <div class="settings">
+      <label>Accent
+        <select id="langSel">
+          <option value="en-US">English (US)</option>
+          <option value="en-GB">English (UK)</option>
+          <option value="en-AU">English (Australia)</option>
+          <option value="en-IN">English (India)</option>
+          <option value="en-IL">English (Israel)</option>
+        </select>
+      </label>
+      <label>Require “Hi Cosmos” <input type="checkbox" id="wakeChk" checked style="flex:none"></label>
+    </div>
+    <ul id="cmdList"></ul>
+  </details>
+
+  <div id="hint">Click = add planet · Drag = move view · Scroll / pinch = zoom · Shift+drag = throw · Space = pause</div>
+
+  <div id="hud" class="panel">
+    <div id="transcript">Press 🎙 and say “Hi Cosmos — create the solar system”</div>
+    <div class="controls">
+      <button id="micBtn">🎙 Listen</button>
+      <input id="cmdInput" placeholder="…or type a command and press Enter" autocomplete="off">
+      <button id="voiceBtn" class="ghost" title="Spoken replies">🔊</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    // ============================================================
+    //  Canvas setup
+    // ============================================================
+    const canvas = document.getElementById('sky');
+    const ctx = canvas.getContext('2d');
+    let W = 0, H = 0, DPR = 1;
+    let bgStars = [];
+
+    function resize() {
+      DPR = Math.min(window.devicePixelRatio || 1, 2);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * DPR;
+      canvas.height = H * DPR;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      bgStars = Array.from({ length: Math.floor(W * H / 2500) }, () => ({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.2 + 0.2,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.5 + Math.random() * 2,
+      }));
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ============================================================
+    //  Simulation state
+    // ============================================================
+    const BASE_G = 1;
+    const SOFTENING = 25;        // avoids infinite force at tiny distances
+    const MAX_TRAIL = 90;
+
+    const sim = {
+      bodies: [],
+      sparks: [],
+      paused: false,
+      timeScale: 1,
+      gravity: 1,
+      trails: true,
+    };
+
+    const PLANET_COLORS = ['#4fd6ff', '#7bff9e', '#ffb35b', '#ff6b8b', '#c38bff', '#ffe066', '#6b9cff', '#ff9ff3'];
+    const randColor = () => PLANET_COLORS[Math.floor(Math.random() * PLANET_COLORS.length)];
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const G = () => BASE_G * sim.gravity;
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+    // ============================================================
+    //  Camera: (x, y) is the world point at the screen center.
+    //  In auto mode it smoothly follows and frames all bodies.
+    // ============================================================
+    const cam = { x: W / 2, y: H / 2, zoom: 1, auto: true };
+    const MIN_ZOOM = 0.03, MAX_ZOOM = 8;
+
+    function screenToWorld(sx, sy) {
+      return { x: (sx - W / 2) / cam.zoom + cam.x, y: (sy - H / 2) / cam.zoom + cam.y };
+    }
+
+    // Zoom keeping the world point under (sx, sy) fixed on screen
+    function zoomAt(sx, sy, factor) {
+      const p = screenToWorld(sx, sy);
+      cam.zoom = clamp(cam.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+      cam.x = p.x - (sx - W / 2) / cam.zoom;
+      cam.y = p.y - (sy - H / 2) / cam.zoom;
+    }
+
+    function setAutoView(on) {
+      cam.auto = on;
+      document.getElementById('fitBtn').classList.toggle('active', on);
+    }
+
+    function updateAutoCamera() {
+      const bs = sim.bodies;
+      if (!cam.auto || bs.length === 0) return;
+      // center of mass
+      let M = 0, cx = 0, cy = 0;
+      for (const b of bs) { M += b.m; cx += b.x * b.m; cy += b.y * b.m; }
+      cx /= M; cy /= M;
+      // radius that holds 90% of the bodies (ignores a few runaways)
+      const d = bs.map(b => Math.hypot(b.x - cx, b.y - cy)).sort((a, b) => a - b);
+      const R = d[Math.floor((d.length - 1) * 0.9)] + 40;
+      const target = clamp(Math.min(W, H - 160) * 0.48 / R, MIN_ZOOM, 2.5);
+      cam.x += (cx - cam.x) * 0.06;
+      cam.y += (cy - cam.y) * 0.06;
+      cam.zoom *= Math.pow(target / cam.zoom, 0.06);
+    }
+
+    function radiusFor(m, type) {
+      if (type === 'hole') return 10 + Math.cbrt(m) * 0.15;
+      return Math.max(1.5, Math.cbrt(m) * 1.15);
+    }
+
+    function addBody({ x, y, vx = 0, vy = 0, m = 10, r, color = randColor(), type = 'planet' }) {
+      const b = { x, y, vx, vy, ax: 0, ay: 0, m, color, type, r: r ?? radiusFor(m, type), trail: [] };
+      sim.bodies.push(b);
+      return b;
+    }
+
+    function heaviest() {
+      let best = null;
+      for (const b of sim.bodies) if (!best || b.m > best.m) best = b;
+      return best;
+    }
+
+    // Velocity for a circular orbit around `c`
+    function orbitVelocity(x, y, c, dir = 1) {
+      const dx = x - c.x, dy = y - c.y;
+      const r = Math.hypot(dx, dy) || 1;
+      const v = Math.sqrt(G() * c.m / r);
+      return { vx: c.vx - (dy / r) * v * dir, vy: c.vy + (dx / r) * v * dir };
+    }
+
+    function step(dt) {
+      const bs = sim.bodies;
+      const n = bs.length;
+      const g = G();
+
+      for (const b of bs) { b.ax = 0; b.ay = 0; }
+
+      // Newtonian gravity between every pair
+      for (let i = 0; i < n; i++) {
+        const a = bs[i];
+        for (let j = i + 1; j < n; j++) {
+          const b = bs[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const d2 = dx * dx + dy * dy + SOFTENING;
+          const inv = g / (d2 * Math.sqrt(d2));
+          a.ax += dx * inv * b.m; a.ay += dy * inv * b.m;
+          b.ax -= dx * inv * a.m; b.ay -= dy * inv * a.m;
+        }
+      }
+
+      for (const b of bs) {
+        b.vx += b.ax * dt; b.vy += b.ay * dt;
+        b.x += b.vx * dt;  b.y += b.vy * dt;
+      }
+
+      // Collisions: merge bodies that touch (momentum is conserved)
+      for (let i = 0; i < bs.length; i++) {
+        for (let j = i + 1; j < bs.length; j++) {
+          const a = bs[i], b = bs[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const rr = a.r + b.r;
+          if (dx * dx + dy * dy < rr * rr * 0.6) {
+            const big = a.m >= b.m ? a : b;
+            const small = big === a ? b : a;
+            const m = a.m + b.m;
+            const fx = (a.x * a.m + b.x * b.m) / m, fy = (a.y * a.m + b.y * b.m) / m;
+            spawnSparks(small.x, small.y, small.color, Math.min(30, 6 + small.m));
+            big.vx = (a.vx * a.m + b.vx * b.m) / m;
+            big.vy = (a.vy * a.m + b.vy * b.m) / m;
+            big.x = fx; big.y = fy; big.m = m;
+            if (small.type === 'hole') big.type = 'hole';
+            if (small.type === 'star' && big.type === 'planet') big.type = 'star';
+            big.r = Math.max(big.r, radiusFor(m, big.type));
+            bs.splice(bs.indexOf(small), 1);
+            j = i; // re-check this body
+          }
+        }
+      }
+    }
+
+    function spawnSparks(x, y, color, count) {
+      for (let i = 0; i < count; i++) {
+        const ang = Math.random() * Math.PI * 2, sp = rand(0.5, 3);
+        sim.sparks.push({ x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: 1, color });
+      }
+    }
+
+    // ============================================================
+    //  Scenarios
+    // ============================================================
+    const scale = () => Math.min(W, H) / 800;
+
+    function clearAll() {
+      sim.bodies = [];
+      sim.sparks = [];
+      setAutoView(true);
+    }
+
+    function solarSystem() {
+      clearAll();
+      const s = scale();
+      const sun = addBody({ x: W / 2, y: H / 2, m: 5000, color: '#ffcc55', type: 'star' });
+      const planets = [
+        { r: 60,  m: 0.3, size: 2.5, color: '#b0a89a' },  // Mercury
+        { r: 95,  m: 0.6, size: 4,   color: '#ffcf8a' },  // Venus
+        { r: 135, m: 0.7, size: 4.2, color: '#4fa8ff' },  // Earth
+        { r: 175, m: 0.4, size: 3,   color: '#ff6b4f' },  // Mars
+        { r: 240, m: 2,   size: 8,   color: '#e0b080' },  // Jupiter
+        { r: 305, m: 1.5, size: 7,   color: '#f2d58c' },  // Saturn
+        { r: 355, m: 1,   size: 5.5, color: '#8ff0ff' },  // Uranus
+      ];
+      for (const p of planets) {
+        const ang = Math.random() * Math.PI * 2;
+        const x = sun.x + Math.cos(ang) * p.r * s, y = sun.y + Math.sin(ang) * p.r * s;
+        addBody({ x, y, m: p.m, r: p.size, color: p.color, ...orbitVelocity(x, y, sun) });
+      }
+    }
+
+    function binaryStars() {
+      clearAll();
+      const s = scale(), d = 60 * s, m = 2500;
+      const v = Math.sqrt(G() * m / (4 * d));
+      addBody({ x: W / 2 - d, y: H / 2, vx: 0, vy: -v, m, color: '#ffb35b', type: 'star' });
+      addBody({ x: W / 2 + d, y: H / 2, vx: 0, vy: v, m, color: '#6bc8ff', type: 'star' });
+      const center = { x: W / 2, y: H / 2, vx: 0, vy: 0, m: 2 * m };
+      for (let i = 0; i < 5; i++) {
+        const r = (200 + i * 45) * s, ang = Math.random() * Math.PI * 2;
+        const x = W / 2 + Math.cos(ang) * r, y = H / 2 + Math.sin(ang) * r;
+        addBody({ x, y, m: rand(2, 8), ...orbitVelocity(x, y, center) });
+      }
+    }
+
+    function galaxy() {
+      clearAll();
+      const core = addBody({ x: W / 2, y: H / 2, m: 8000, type: 'hole', color: '#ff9d4f' });
+      const maxR = Math.min(W, H) * 0.45;
+      const colors = ['#9db4ff', '#c38bff', '#ffffff', '#4fd6ff', '#ff9ff3'];
+      for (let i = 0; i < 220; i++) {
+        // two spiral arms
+        const arm = i % 2;
+        const t = Math.random();
+        const r = 50 + t * (maxR - 50);
+        const ang = arm * Math.PI + t * 5 + rand(-0.35, 0.35);
+        const x = core.x + Math.cos(ang) * r, y = core.y + Math.sin(ang) * r;
+        addBody({ x, y, m: 0.3, color: colors[i % colors.length], ...orbitVelocity(x, y, core) });
+      }
+    }
+
+    function bigBang() {
+      clearAll();
+      // Start spread out, moving outward faster the farther they are (like a real expansion),
+      // so particles don't overlap and merge into one blob on the first frame
+      for (let i = 0; i < 160; i++) {
+        const ang = Math.random() * Math.PI * 2, t = Math.sqrt(Math.random());
+        const d = 8 + t * 70, sp = 0.6 + t * 3;
+        addBody({
+          x: W / 2 + Math.cos(ang) * d, y: H / 2 + Math.sin(ang) * d,
+          vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+          m: rand(1, 6), color: randColor(),
+        });
+      }
+      spawnSparks(W / 2, H / 2, '#ffffff', 80);
+    }
+
+    function addPlanets(n) {
+      let c = heaviest();
+      if (!c) c = addBody({ x: cam.x, y: cam.y, m: 4000, color: '#ffcc55', type: 'star' });
+      for (let i = 0; i < n; i++) {
+        const r = rand(70, Math.min(W, H) * 0.45), ang = Math.random() * Math.PI * 2;
+        const x = c.x + Math.cos(ang) * r, y = c.y + Math.sin(ang) * r;
+        addBody({ x, y, m: rand(2, 20), ...orbitVelocity(x, y, c) });
+      }
+    }
+
+    function addStar() {
+      const { x, y } = screenToWorld(rand(W * 0.2, W * 0.8), rand(H * 0.2, H * 0.6));
+      addBody({ x, y, m: 3000, color: Math.random() < 0.5 ? '#ffcc55' : '#ff8a5b', type: 'star' });
+    }
+
+    function addBlackHole() {
+      const { x, y } = sim.bodies.length === 0
+        ? { x: cam.x, y: cam.y }
+        : screenToWorld(rand(W * 0.25, W * 0.75), rand(H * 0.25, H * 0.6));
+      addBody({ x, y, m: 15000, type: 'hole', color: '#ff9d4f' });
+    }
+
+    function addComet() {
+      let c = heaviest();
+      if (!c) c = addBody({ x: cam.x, y: cam.y, m: 4000, color: '#ffcc55', type: 'star' });
+      const r = Math.min(W, H) * 0.48, ang = Math.random() * Math.PI * 2;
+      const x = c.x + Math.cos(ang) * r, y = c.y + Math.sin(ang) * r;
+      const v = orbitVelocity(x, y, c);
+      // slower than circular speed → long elliptical orbit that dives close to the star
+      addBody({ x, y, m: 1, color: '#bff6ff', vx: c.vx + (v.vx - c.vx) * 0.45, vy: c.vy + (v.vy - c.vy) * 0.45 });
+    }
+
+    function reverseTime() {
+      for (const b of sim.bodies) { b.vx = -b.vx; b.vy = -b.vy; }
+    }
+
+    // ============================================================
+    //  Commands (shared by voice, typing and help-list clicks)
+    // ============================================================
+    const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twenty: 20, dozen: 12 };
+
+    function parseCount(text, fallback = 1) {
+      const digits = text.match(/\b(\d+)\b/);
+      if (digits) return Math.min(50, Math.max(1, +digits[1]));
+      for (const w of text.split(' ')) if (NUMBER_WORDS[w]) return NUMBER_WORDS[w];
+      return /\b(some|few|several)\b/.test(text) ? 5 : fallback;
+    }
+
+    function scene(build, reply) {
+      build();
+      sim.paused = false;
+      setAutoView(true);
+      return reply;
+    }
+
+    function setTrails(c) {
+      if (/\b(off|hide|remove|disable|no)\b/.test(c)) sim.trails = false;
+      else if (/\b(on|show|enable)\b/.test(c)) sim.trails = true;
+      else sim.trails = !sim.trails;
+      if (!sim.trails) sim.bodies.forEach(b => (b.trail = []));
+      return sim.trails ? 'Trails on.' : 'Trails off.';
+    }
+
+    // [pattern, action] — first match wins, so order matters.
+    // Patterns also accept common speech-recognition mishearings ("comment" for "comet", "big band"…).
+    const RULES = [
+      [/\bhelp\b|what can you/, () => { document.getElementById('help').open = true; return "Here's what I can do."; }],
+      [/\b(trails?|tails?|trial)\b/, setTrails],
+      [/zoom ?out|zoom back|further|farther|wider/, () => { zoomAt(W / 2, H / 2, 1 / 1.6); setAutoView(false); return 'Zooming out.'; }],
+      [/zoom|closer|enlarge|magnify/, () => { zoomAt(W / 2, H / 2, 1.6); setAutoView(false); return 'Zooming in.'; }],
+      [/\b(fit|overview|show (me )?(all|everything)|auto ?view|reset (the )?(view|camera)|cent(er|re)|where)\b/, () => { setAutoView(true); return 'Showing everything.'; }],
+      [/sol[ae]r|\bsystem\b/, () => scene(solarSystem, 'Creating the solar system.')],
+      [/binary|by nary|two stars|double stars?\b|twin/, () => scene(binaryStars, 'Creating binary stars.')],
+      [/gala|spiral|milky/, () => scene(galaxy, 'Creating a spiral galaxy.')],
+      [/big ?ba(ng|nd)|bing bang|explo|boom|\bbang/, () => scene(bigBang, 'Big bang!')],
+      [/black|\bhole\b|\bwhole\b/, () => { addBlackHole(); return 'A black hole appears.'; }],
+      [/\bcom(et|ment|it|mit)s?\b/, c => {
+        const n = parseCount(c);
+        for (let i = 0; i < n; i++) addComet();
+        return n > 1 ? `Launching ${n} comets.` : 'Launching a comet.';
+      }],
+      [/revers|rewind|backward|undo time|back in time/, () => { reverseTime(); return 'Reversing time.'; }],
+      [/\b(stop|stopped|pause|paused|freeze|halt|wait|hold)\b/, () => { sim.paused = true; return 'Simulation paused.'; }],
+      [/\b(start|started|resume|play|continue|go|unpause|run|unfreeze)\b/, () => { sim.paused = false; return 'Simulation running.'; }],
+      [/\b(clear|reset|delete|remove|destroy|empty|wipe|clean)\b/, () => { clearAll(); return 'The universe is empty.'; }],
+      [/(more|increase|stronger|double|raise).*gravity|gravity.*\b(up|more|stronger|higher)\b/, () => {
+        sim.gravity = Math.min(8, sim.gravity * 2); return `Gravity ${sim.gravity} times.`;
+      }],
+      [/(less|decrease|weaker|reduce|lower|half).*gravity|gravity.*\b(down|less|weaker|lower)\b/, () => {
+        sim.gravity = Math.max(0.125, sim.gravity / 2); return `Gravity ${sim.gravity} times.`;
+      }],
+      [/faster|speed up|accelerate|quicker/, () => { sim.timeScale = Math.min(8, sim.timeScale * 2); return `Speed ${sim.timeScale} times.`; }],
+      [/slower|slow down|slow motion|decelerate/, () => { sim.timeScale = Math.max(0.125, sim.timeScale / 2); return `Speed ${sim.timeScale} times.`; }],
+      [/\b(normal|default)\b/, () => { sim.timeScale = 1; sim.gravity = 1; return 'Back to normal.'; }],
+      [/\b(stars?|suns?)\b/, () => { addStar(); return 'A new star is born.'; }],
+      [/\b(plan[ae]?ts?|plants?|moons?|asteroids?|rocks?|worlds?)\b|\b(add|create|make|spawn)\b/, c => {
+        const n = parseCount(c);
+        addPlanets(n);
+        return n > 1 ? `Adding ${n} planets.` : 'Adding a planet.';
+      }],
+    ];
+
+    // Returns a function that runs the command, or null if the text isn't a known command
+    function matchCommand(raw) {
+      const c = raw.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!c) return null;
+      const rule = RULES.find(([re]) => re.test(c));
+      return rule ? () => rule[1](c) : null;
+    }
+
+    function runCommand(raw) {
+      if (!raw.trim()) return null;
+      const action = matchCommand(raw);
+      return action ? action() : "Sorry, I didn't understand. Say help.";
+    }
+
+    const COMMANDS = [
+      ['create the solar system', 'scene'],
+      ['create a galaxy', 'scene'],
+      ['big bang', 'scene'],
+      ['binary stars', 'scene'],
+      ['add 5 planets', 'add'],
+      ['add a black hole', 'add'],
+      ['launch a comet', 'add'],
+      ['add a star', 'add'],
+      ['stop', 'control'],
+      ['start', 'control'],
+      ['reverse time', 'control'],
+      ['faster / slower', 'control'],
+      ['more / less gravity', 'control'],
+      ['trails off / on', 'control'],
+      ['clear', 'control'],
+      ['zoom in / out', 'view'],
+      ['show everything', 'view'],
+    ];
+    const cmdList = document.getElementById('cmdList');
+    for (const [text, tag] of COMMANDS) {
+      const li = document.createElement('li');
+      li.innerHTML = `“${text}”<span>${tag}</span>`;
+      li.addEventListener('click', () => execute(text.split(' / ')[0], false));
+      cmdList.appendChild(li);
+    }
+
+    // ============================================================
+    //  Feedback: toast + spoken replies
+    // ============================================================
+    const toastEl = document.getElementById('toast');
+    let toastTimer = 0;
+    let voiceReplies = true;
+    let speaking = false;
+
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+    }
+
+    function say(msg) {
+      if (!voiceReplies || !('speechSynthesis' in window)) return;
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(msg);
+      u.rate = 1.05; u.pitch = 0.9;
+      speaking = true;
+      u.onend = u.onerror = () => setTimeout(() => (speaking = false), 300);
+      speechSynthesis.speak(u);
+    }
+
+    function execute(text, speak = true) {
+      const reply = runCommand(text);
+      if (!reply) return null;
+      toast(reply);
+      if (speak) say(reply);
+      hideHint();
+      return reply;
+    }
+
+    document.getElementById('voiceBtn').addEventListener('click', e => {
+      voiceReplies = !voiceReplies;
+      e.currentTarget.textContent = voiceReplies ? '🔊' : '🔇';
+      if (!voiceReplies && 'speechSynthesis' in window) speechSynthesis.cancel();
+    });
+
+    const cmdInput = document.getElementById('cmdInput');
+    cmdInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const text = cmdInput.value.replace(WAKE_WORD, ' ');
+        execute(text, false);
+        cmdInput.value = '';
+      }
+    });
+
+    // ============================================================
+    //  Microphone: audio visualizer + speech recognition
+    // ============================================================
+    const audio = { analyser: null, data: null, level: 0, bass: 0, stream: null, ctx: null };
+    const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // "Hi Cosmos" plus the ways recognizers tend to mishear it: kosmos, causmos, cozmo, cos mos…
+    const WAKE_WORD = /\b(?:(?:hi|hey|high|hay|hello|ok|okay|yo|a)\s*,?\s*)?[ckg](?:o|a|u|au|ou)(?:s|z|th)+\s?m\w*/i;
+    const langSel = document.getElementById('langSel');
+    const wakeChk = document.getElementById('wakeChk');
+    const transcriptEl = document.getElementById('transcript');
+    const micBtn = document.getElementById('micBtn');
+    let recognition = null;
+    let listening = false;
+    let awakeUntil = 0;
+
+    function setTranscript(text, cls = '') {
+      transcriptEl.textContent = text;
+      transcriptEl.className = cls;
+    }
+
+    async function startAudio() {
+      audio.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = audio.ctx.createMediaStreamSource(audio.stream);
+      audio.analyser = audio.ctx.createAnalyser();
+      audio.analyser.fftSize = 256;
+      audio.analyser.smoothingTimeConstant = 0.8;
+      src.connect(audio.analyser);
+      audio.data = new Uint8Array(audio.analyser.frequencyBinCount);
+    }
+
+    function stopAudio() {
+      if (audio.stream) audio.stream.getTracks().forEach(t => t.stop());
+      if (audio.ctx) audio.ctx.close();
+      audio.analyser = null; audio.stream = null; audio.ctx = null;
+    }
+
+    // Text after the wake word, or null if there is no wake word
+    function afterWake(text) {
+      const m = text.match(WAKE_WORD);
+      return m ? text.slice(m.index + m[0].length).replace(/^[\s,.\-–—!?]+/, '').trim() : null;
+    }
+
+    function runVoice(heard, command) {
+      awakeUntil = 0;
+      setTranscript(`“${heard}” → ${execute(command)}`, 'ok');
+    }
+
+    // The recognizer returns several guesses per phrase; act on the first one that makes sense
+    function handleSpeech(result) {
+      const alts = Array.from(result, a => a.transcript.trim()).filter(Boolean);
+      if (!alts.length) return;
+      const ready = !wakeChk.checked || performance.now() < awakeUntil;
+
+      for (const text of alts) {
+        const cmd = afterWake(text);
+        if (cmd && matchCommand(cmd)) return runVoice(text, cmd);
+      }
+      if (ready) {
+        for (const text of alts) if (matchCommand(text)) return runVoice(text, text);
+      }
+
+      const withWake = alts.find(t => afterWake(t) !== null);
+      if (withWake !== undefined && afterWake(withWake).length <= 1) {
+        awakeUntil = performance.now() + 6000;
+        setTranscript('✦ Yes? Listening for a command…', 'awake');
+        say('Yes?');
+      } else if (withWake !== undefined || ready) {
+        setTranscript(`Heard “${withWake ?? alts[0]}” — didn't understand the command`, 'bad');
+      } else {
+        setTranscript(`Heard “${alts[0]}” — start with “Hi Cosmos”`);
+      }
+    }
+
+    function startRecognition() {
+      if (!SpeechRec) {
+        setTranscript('Voice commands need Chrome, Edge or Safari. You can still type commands.');
+        return;
+      }
+      recognition = new SpeechRec();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = langSel.value;
+      recognition.maxAlternatives = 5;
+
+      recognition.onresult = e => {
+        if (speaking) return; // ignore our own spoken replies
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i];
+          if (res.isFinal) handleSpeech(res);
+          else setTranscript(res[0].transcript.trim() + '…', 'interim');
+        }
+      };
+      recognition.onerror = e => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          setTranscript('Microphone blocked. Allow mic access, or type commands.');
+          stopListening();
+        }
+      };
+      // Browsers end recognition after silence; keep it going while listening
+      recognition.onend = () => { if (listening) try { recognition.start(); } catch (_) {} };
+      recognition.start();
+    }
+
+    async function startListening() {
+      try {
+        await startAudio();
+      } catch (err) {
+        setTranscript('Could not access the microphone. You can still type commands.');
+        return;
+      }
+      listening = true;
+      micBtn.textContent = '■ Stop';
+      micBtn.classList.add('on');
+      setTranscript('Say “Hi Cosmos” followed by a command');
+      startRecognition();
+    }
+
+    function stopListening() {
+      listening = false;
+      if (recognition) { recognition.onend = null; try { recognition.stop(); } catch (_) {} recognition = null; }
+      stopAudio();
+      micBtn.textContent = '🎙 Listen';
+      micBtn.classList.remove('on');
+    }
+
+    micBtn.addEventListener('click', () => (listening ? stopListening() : startListening()));
+
+    // Remember voice settings; restart recognition when the language changes
+    try {
+      const saved = JSON.parse(localStorage.getItem('cosmos-voice') || '{}');
+      if (saved.lang) langSel.value = saved.lang;
+      if (typeof saved.wake === 'boolean') wakeChk.checked = saved.wake;
+    } catch (_) {}
+    function saveVoiceSettings() {
+      try { localStorage.setItem('cosmos-voice', JSON.stringify({ lang: langSel.value, wake: wakeChk.checked })); } catch (_) {}
+    }
+    wakeChk.addEventListener('change', saveVoiceSettings);
+    langSel.addEventListener('change', () => {
+      saveVoiceSettings();
+      if (recognition) { recognition.onend = null; try { recognition.stop(); } catch (_) {} startRecognition(); }
+    });
+
+    function updateAudio() {
+      if (!audio.analyser) {
+        audio.level *= 0.9; audio.bass *= 0.9;
+        return;
+      }
+      audio.analyser.getByteFrequencyData(audio.data);
+      let sum = 0, bass = 0;
+      for (let i = 0; i < audio.data.length; i++) {
+        sum += audio.data[i];
+        if (i < 8) bass += audio.data[i];
+      }
+      audio.level = sum / audio.data.length / 255;
+      audio.bass = bass / 8 / 255;
+    }
+
+    // ============================================================
+    //  Mouse / touch
+    //  click = orbiting planet · drag = pan · shift/right-drag = throw
+    //  wheel or pinch = zoom
+    // ============================================================
+    let drag = null;
+    let pinch = null;
+    const pointers = new Map();
+    const hintEl = document.getElementById('hint');
+    function hideHint() { hintEl.style.opacity = 0; }
+
+    function pinchState() {
+      const [a, b] = [...pointers.values()];
+      return { dist: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    }
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    canvas.addEventListener('pointerdown', e => {
+      canvas.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) { drag = null; pinch = pinchState(); return; }
+      const mode = e.button === 2 || e.shiftKey ? 'throw' : 'click';
+      drag = { mode, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };
+    });
+
+    canvas.addEventListener('pointermove', e => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pinch && pointers.size === 2) {
+        const now = pinchState();
+        zoomAt(now.mx, now.my, now.dist / pinch.dist);
+        cam.x -= (now.mx - pinch.mx) / cam.zoom;
+        cam.y -= (now.my - pinch.my) / cam.zoom;
+        pinch = now;
+        setAutoView(false);
+        return;
+      }
+      if (!drag) return;
+      if (drag.mode === 'click' && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 6) drag.mode = 'pan';
+      if (drag.mode === 'pan') {
+        cam.x -= (e.clientX - drag.x) / cam.zoom;
+        cam.y -= (e.clientY - drag.y) / cam.zoom;
+        setAutoView(false);
+      }
+      drag.x = e.clientX; drag.y = e.clientY;
+    });
+
+    function endPointer(e, cancelled) {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (!drag || cancelled) { drag = null; return; }
+
+      const start = screenToWorld(drag.x0, drag.y0);
+      const dx = drag.x - drag.x0, dy = drag.y - drag.y0;
+      const m = rand(3, 15);
+      const isClick = Math.hypot(dx, dy) < 6;
+      if (drag.mode === 'click' || (drag.mode === 'throw' && isClick)) {
+        const c = heaviest();
+        if (c) addBody({ x: start.x, y: start.y, m, ...orbitVelocity(start.x, start.y, c) });
+        else addBody({ x: start.x, y: start.y, m: 4000, color: '#ffcc55', type: 'star' });
+        hideHint();
+      } else if (drag.mode === 'throw') {
+        addBody({ x: start.x, y: start.y, vx: dx / cam.zoom * 0.03, vy: dy / cam.zoom * 0.03, m });
+        hideHint();
+      }
+      drag = null;
+    }
+    canvas.addEventListener('pointerup', e => endPointer(e, false));
+    canvas.addEventListener('pointercancel', e => endPointer(e, true));
+
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const delta = e.deltaY * (e.deltaMode === 1 ? 30 : 1);
+      // trackpad pinch arrives as ctrl+wheel with small deltas
+      zoomAt(e.clientX, e.clientY, Math.exp(-delta * (e.ctrlKey ? 0.01 : 0.0015)));
+      setAutoView(false);
+    }, { passive: false });
+
+    document.getElementById('zoomInBtn').addEventListener('click', () => { zoomAt(W / 2, H / 2, 1.5); setAutoView(false); });
+    document.getElementById('zoomOutBtn').addEventListener('click', () => { zoomAt(W / 2, H / 2, 1 / 1.5); setAutoView(false); });
+    document.getElementById('fitBtn').addEventListener('click', () => setAutoView(!cam.auto));
+
+    window.addEventListener('keydown', e => {
+      if (e.target === cmdInput) return;
+      if (e.code === 'Space') { e.preventDefault(); sim.paused = !sim.paused; toast(sim.paused ? 'Simulation paused.' : 'Simulation running.'); }
+      else if (e.key === '+' || e.key === '=') { zoomAt(W / 2, H / 2, 1.5); setAutoView(false); }
+      else if (e.key === '-' || e.key === '_') { zoomAt(W / 2, H / 2, 1 / 1.5); setAutoView(false); }
+      else if (e.key === 'f' || e.key === 'F') setAutoView(true);
+    });
+
+    // ============================================================
+    //  Rendering
+    // ============================================================
+    function drawBackground(t) {
+      ctx.fillStyle = '#05060f';
+      ctx.fillRect(0, 0, W, H);
+      const boost = audio.level * 1.6;
+      ctx.fillStyle = '#fff';
+      for (const s of bgStars) {
+        ctx.globalAlpha = Math.min(1, 0.25 + 0.35 * Math.sin(t * 0.001 * s.speed + s.phase) + boost);
+        ctx.fillRect(s.x, s.y, s.r, s.r);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawTrails() {
+      if (!sim.trails) return;
+      ctx.lineWidth = 1.2 / cam.zoom;
+      for (const b of sim.bodies) {
+        const tr = b.trail;
+        if (tr.length < 2) continue;
+        ctx.strokeStyle = b.color;
+        // draw in segments so older parts fade out
+        const seg = 6;
+        for (let k = 0; k < tr.length - 1; k += seg) {
+          ctx.globalAlpha = 0.5 * (k / tr.length);
+          ctx.beginPath();
+          ctx.moveTo(tr[k].x, tr[k].y);
+          for (let i = k + 1; i <= Math.min(k + seg, tr.length - 1); i++) ctx.lineTo(tr[i].x, tr[i].y);
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBodies(t) {
+      const pulse = 1 + audio.bass * 1.5;
+      const minR = 1.3 / cam.zoom; // keep tiny bodies visible when zoomed out
+      for (const body of sim.bodies) {
+        const b = body.r >= minR ? body : { ...body, r: minR };
+        if (b.type === 'star') {
+          const glow = b.r * (3 + Math.sin(t * 0.003) * 0.2) * pulse;
+          const g = ctx.createRadialGradient(b.x, b.y, b.r * 0.3, b.x, b.y, glow);
+          g.addColorStop(0, '#ffffff');
+          g.addColorStop(0.25, b.color);
+          g.addColorStop(1, 'transparent');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(b.x, b.y, glow, 0, Math.PI * 2); ctx.fill();
+        } else if (b.type === 'hole') {
+          const glow = b.r * 2.6 * pulse;
+          const g = ctx.createRadialGradient(b.x, b.y, b.r * 0.9, b.x, b.y, glow);
+          g.addColorStop(0, '#ffd28a');
+          g.addColorStop(0.3, 'rgba(255,120,60,0.6)');
+          g.addColorStop(1, 'transparent');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(b.x, b.y, glow, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#000';
+          ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+        } else {
+          ctx.fillStyle = b.color;
+          ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+          if (b.r > 3) {
+            ctx.fillStyle = 'rgba(255,255,255,0.35)';
+            ctx.beginPath(); ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.4, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      }
+    }
+
+    function drawSparks() {
+      for (let i = sim.sparks.length - 1; i >= 0; i--) {
+        const s = sim.sparks[i];
+        s.x += s.vx; s.y += s.vy; s.vx *= 0.96; s.vy *= 0.96; s.life -= 0.02;
+        if (s.life <= 0) { sim.sparks.splice(i, 1); continue; }
+        ctx.globalAlpha = s.life;
+        ctx.fillStyle = s.color;
+        const size = 2 / cam.zoom;
+        ctx.fillRect(s.x - size / 2, s.y - size / 2, size, size);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function drawDrag() {
+      if (!drag || drag.mode !== 'throw') return;
+      const dx = drag.x - drag.x0, dy = drag.y - drag.y0;
+      if (Math.hypot(dx, dy) < 6) return;
+      ctx.strokeStyle = 'rgba(79,214,255,0.8)';
+      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(drag.x0, drag.y0); ctx.lineTo(drag.x, drag.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#4fd6ff';
+      ctx.beginPath(); ctx.arc(drag.x0, drag.y0, 5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Circular audio visualizer just above the control panel
+    function drawVisualizer(t) {
+      const hud = document.getElementById('hud').getBoundingClientRect();
+      const cx = W / 2, cy = hud.top - 62, baseR = 26;
+      const awake = performance.now() < awakeUntil;
+      const color = awake ? '#4fd6ff' : listening ? '#8b7bff' : '#3a4066';
+
+      // glowing core
+      const coreR = baseR * (0.85 + audio.level * 0.6);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR * 1.8);
+      g.addColorStop(0, color);
+      g.addColorStop(0.5, color + '55');
+      g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(cx, cy, coreR * 1.8, 0, Math.PI * 2); ctx.fill();
+
+      // frequency bars around the ring (mirrored so the shape is symmetric)
+      const bars = 64;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < bars; i++) {
+        const bin = i < bars / 2 ? i : bars - 1 - i;
+        let v = audio.data && audio.analyser ? audio.data[bin * 2] / 255 : 0;
+        if (!audio.analyser) v = 0.05 + 0.04 * Math.sin(t * 0.002 + i * 0.4); // idle breathing
+        const ang = (i / bars) * Math.PI * 2 - Math.PI / 2;
+        const r1 = baseR + 4, r2 = r1 + 4 + v * 34;
+        ctx.globalAlpha = 0.4 + v * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+        ctx.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ============================================================
+    //  Main loop
+    // ============================================================
+    const statEls = {
+      bodies: document.getElementById('sBodies'),
+      speed: document.getElementById('sSpeed'),
+      gravity: document.getElementById('sGravity'),
+      state: document.getElementById('sState'),
+      view: document.getElementById('sView'),
+    };
+    let frameCount = 0;
+
+    function frame(t) {
+      updateAudio();
+
+      if (!sim.paused) {
+        const substeps = Math.ceil(4 * sim.timeScale);
+        const dt = sim.timeScale / substeps;
+        for (let i = 0; i < substeps; i++) step(dt);
+
+          // drop bodies that flew very far from the heaviest one
+        const h = heaviest();
+        const limit = Math.max(W, H) * 10;
+        if (h) sim.bodies = sim.bodies.filter(b => Math.abs(b.x - h.x) < limit && Math.abs(b.y - h.y) < limit);
+
+        if (sim.trails) {
+          for (const b of sim.bodies) {
+            if (b.type !== 'planet') continue;
+            b.trail.push({ x: b.x, y: b.y });
+            if (b.trail.length > MAX_TRAIL) b.trail.shift();
+          }
+        }
+      }
+
+      updateAutoCamera();
+      drawBackground(t);
+      ctx.save();
+      ctx.translate(W / 2, H / 2);
+      ctx.scale(cam.zoom, cam.zoom);
+      ctx.translate(-cam.x, -cam.y);
+      drawTrails();
+      drawBodies(t);
+      drawSparks();
+      ctx.restore();
+      drawDrag();
+      drawVisualizer(t);
+
+      if (++frameCount % 10 === 0) {
+        statEls.bodies.textContent = sim.bodies.length;
+        statEls.speed.textContent = sim.timeScale + '×';
+        statEls.gravity.textContent = sim.gravity + '×';
+        statEls.state.textContent = sim.paused ? 'Paused' : 'Running';
+        statEls.view.textContent = (cam.auto ? 'Auto ' : '') + Math.round(cam.zoom * 100) + '%';
+      }
+      requestAnimationFrame(frame);
+    }
+
+    solarSystem();
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
